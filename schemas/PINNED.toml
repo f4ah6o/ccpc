@@ -1,0 +1,14 @@
+# Schema vendoring pins for ccpc / apx.
+# Replace TODO values with exact upstream versions or commit SHAs.
+
+[claude-code]
+source = "TODO-pin-exact"
+version = "TODO-pin-exact"
+
+[codex]
+source = "TODO-pin-exact"
+version = "TODO-pin-exact"
+
+[opencode]
+source = "TODO-pin-exact"
+version = "TODO-pin-exact"
