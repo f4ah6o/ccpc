@@ -87,13 +87,26 @@ struct Diagnostic {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
     match cli.command {
-        Command::Convert { from, to, root, out, bridge_hooks } => {
+        Command::Convert {
+            from,
+            to,
+            root,
+            out,
+            bridge_hooks,
+        } => {
             let ir = parse(from, &root)?;
             emit(to, &ir, &out, bridge_hooks)?;
             print_diagnostics(&ir.diagnostics);
         }
-        Command::Multiplex { from, to, root, out, bridge_hooks } => {
+        Command::Multiplex {
+            from,
+            to,
+            root,
+            out,
+            bridge_hooks,
+        } => {
             let ir = parse(from, &root)?;
             fs::create_dir_all(&out)?;
             for target in to {
@@ -106,6 +119,7 @@ fn main() -> Result<()> {
             print_diagnostics(&lint(&ir));
         }
     }
+
     Ok(())
 }
 
@@ -120,23 +134,37 @@ fn parse(target: Target, root: &Path) -> Result<Ir> {
 
 fn parse_skills(root: &Path, ir: &mut Ir) -> Result<()> {
     let skills = root.join("skills");
-    if !skills.exists() { return Ok(()); }
-    for entry in WalkDir::new(&skills).into_iter().filter_map(Result::ok).filter(|e| e.file_type().is_file()) {
-        let path = entry.path();
-        let rel_path = path.strip_prefix(root).unwrap().to_path_buf();
-        ir.skills.push(Skill { rel_path, content: fs::read(path)? });
+    if !skills.exists() {
+        return Ok(());
     }
+
+    for entry in WalkDir::new(&skills)
+        .into_iter()
+        .filter_map(std::result::Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+    {
+        let path = entry.path();
+        let rel_path = path.strip_prefix(root)?.to_path_buf();
+        ir.skills.push(Skill {
+            rel_path,
+            content: fs::read(path)?,
+        });
+    }
+
     Ok(())
 }
 
 fn parse_mcp(target: Target, root: &Path, ir: &mut Ir) -> Result<()> {
     match target {
         Target::Cc | Target::Codex => {
-            let p = root.join(".mcp.json");
-            if p.exists() { ir.mcp = Some(read_json(&p)?); }
+            let path = root.join(".mcp.json");
+            if path.exists() {
+                ir.mcp = Some(read_json(&path)?);
+            }
         }
         Target::Opencode => {}
     }
+
     Ok(())
 }
 
@@ -146,145 +174,233 @@ fn parse_manifest(target: Target, root: &Path, ir: &mut Ir) -> Result<()> {
         Target::Codex => root.join(".codex-plugin/plugin.json"),
         Target::Opencode => return Ok(()),
     };
-    if !path.exists() { return Ok(()); }
+
+    if !path.exists() {
+        return Ok(());
+    }
+
     let value = read_json(&path)?;
     let mut opaque = Map::new();
+
     if let Value::Object(map) = value {
-        for (k, v) in map {
-            match k.as_str() {
-                "name" => ir.manifest.name = v.as_str().map(str::to_string),
-                "version" => ir.manifest.version = v.as_str().map(str::to_string),
-                "description" => ir.manifest.description = v.as_str().map(str::to_string),
-                _ => { opaque.insert(k, v); }
+        for (key, value) in map {
+            match key.as_str() {
+                "name" => ir.manifest.name = value.as_str().map(str::to_string),
+                "version" => ir.manifest.version = value.as_str().map(str::to_string),
+                "description" => ir.manifest.description = value.as_str().map(str::to_string),
+                _ => {
+                    opaque.insert(key, value);
+                }
             }
         }
     }
+
     if !opaque.is_empty() {
-        ir.diagnostics.push(Diagnostic { level: "warn", code: "OPAQUE_PARKED", message: format!("{} manifest unknown fields parked", target_name(target)) });
+        ir.diagnostics.push(Diagnostic {
+            level: "warn",
+            code: "OPAQUE_PARKED",
+            message: format!("{} manifest unknown fields parked", target_name(target)),
+        });
         ir.manifest.opaque_by_target.insert(target, opaque);
     }
+
     Ok(())
 }
 
 fn parse_opencode(target: Target, root: &Path, ir: &mut Ir) -> Result<()> {
-    if target != Target::Opencode { return Ok(()); }
-    let path = root.join("opencode.json").exists().then(|| root.join("opencode.json"))
-        .or_else(|| root.join(".opencode/opencode.json").exists().then(|| root.join(".opencode/opencode.json")));
+    if target != Target::Opencode {
+        return Ok(());
+    }
+
+    let path = if root.join("opencode.json").exists() {
+        Some(root.join("opencode.json"))
+    } else if root.join(".opencode/opencode.json").exists() {
+        Some(root.join(".opencode/opencode.json"))
+    } else {
+        None
+    };
+
     if let Some(path) = path {
         let value = read_json(&path)?;
-        if let Some(mcp) = value.get("mcp").cloned() { ir.mcp = Some(mcp); }
+        if let Some(mcp) = value.get("mcp").cloned() {
+            ir.mcp = Some(mcp);
+        }
         ir.opencode_config = Some(value);
     }
+
     Ok(())
 }
 
 fn emit(target: Target, ir: &Ir, out: &Path, bridge_hooks: bool) -> Result<()> {
     emit_skills(out, ir)?;
+
     match target {
         Target::Cc => emit_manifest(out.join(".claude-plugin/plugin.json"), Target::Cc, ir)?,
         Target::Codex => emit_manifest(out.join(".codex-plugin/plugin.json"), Target::Codex, ir)?,
         Target::Opencode => emit_opencode(out, ir, bridge_hooks)?,
     }
+
     if matches!(target, Target::Cc | Target::Codex) {
-        if let Some(mcp) = &ir.mcp { write_json(out.join(".mcp.json"), mcp)?; }
+        if let Some(mcp) = &ir.mcp {
+            write_json(out.join(".mcp.json"), mcp)?;
+        }
     }
+
     Ok(())
 }
 
 fn emit_skills(out: &Path, ir: &Ir) -> Result<()> {
     for skill in &ir.skills {
         let dest = out.join(&skill.rel_path);
-        if let Some(parent) = dest.parent() { fs::create_dir_all(parent)?; }
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
         fs::write(dest, &skill.content)?;
     }
+
     Ok(())
 }
 
 fn emit_manifest(path: PathBuf, target: Target, ir: &Ir) -> Result<()> {
     let mut map = Map::new();
-    map.insert("name".into(), json!(ir.manifest.name.clone().unwrap_or_else(|| "ccpc-plugin".into())));
-    if let Some(v) = &ir.manifest.version { map.insert("version".into(), json!(v)); }
-    if let Some(v) = &ir.manifest.description { map.insert("description".into(), json!(v)); }
-    if let Some(opaque) = ir.manifest.opaque_by_target.get(&target) {
-        for (k, v) in opaque { map.insert(k.clone(), v.clone()); }
+    map.insert(
+        "name".into(),
+        json!(ir
+            .manifest
+            .name
+            .clone()
+            .unwrap_or_else(|| "ccpc-plugin".into())),
+    );
+
+    if let Some(version) = &ir.manifest.version {
+        map.insert("version".into(), json!(version));
     }
+    if let Some(description) = &ir.manifest.description {
+        map.insert("description".into(), json!(description));
+    }
+    if let Some(opaque) = ir.manifest.opaque_by_target.get(&target) {
+        for (key, value) in opaque {
+            map.insert(key.clone(), value.clone());
+        }
+    }
+
     write_json(path, &Value::Object(map))
 }
 
 fn emit_opencode(out: &Path, ir: &Ir, bridge_hooks: bool) -> Result<()> {
     let dir = out.join(".opencode");
     fs::create_dir_all(&dir)?;
+
     let mut config = ir.opencode_config.clone().unwrap_or_else(|| json!({}));
+    let config_object = config
+        .as_object_mut()
+        .context("opencode config is not an object")?;
+
     if let Some(mcp) = &ir.mcp {
-        config.as_object_mut().context("opencode config is not an object")?.insert("mcp".into(), mcp.clone());
+        config_object.insert("mcp".into(), mcp.clone());
     }
     if !bridge_hooks {
-        config.as_object_mut().unwrap().entry("plugins").or_insert(json!([]));
+        config_object.entry("plugins").or_insert(json!([]));
     }
+
     write_json(dir.join("opencode.json"), &config)?;
+
     let opencode_skills = dir.join("skills");
     if !opencode_skills.exists() {
         #[cfg(unix)]
-        std::os::unix::fs::symlink("../skills", &opencode_skills).ok();
+        let _ = std::os::unix::fs::symlink("../skills", &opencode_skills);
     }
     if !opencode_skills.exists() {
-        copy_dir_all(out.join("skills"), opencode_skills).ok();
+        let _ = copy_dir_all(out.join("skills"), opencode_skills);
     }
+
     Ok(())
 }
 
 fn lint(ir: &Ir) -> Vec<Diagnostic> {
-    let mut d = ir.diagnostics.clone();
+    let mut diagnostics = ir.diagnostics.clone();
     for target in ir.manifest.opaque_by_target.keys() {
-        d.push(Diagnostic { level: "info", code: "ROUNDTRIP_OPAQUE", message: format!("opaque manifest fields can be rehydrated for {}", target_name(*target)) });
+        diagnostics.push(Diagnostic {
+            level: "info",
+            code: "ROUNDTRIP_OPAQUE",
+            message: format!(
+                "opaque manifest fields can be rehydrated for {}",
+                target_name(*target)
+            ),
+        });
     }
-    d
+    diagnostics
 }
 
-fn print_diagnostics(diags: &[Diagnostic]) {
-    for d in diags {
-        eprintln!("{} {}: {}", d.level, d.code, d.message);
+fn print_diagnostics(diagnostics: &[Diagnostic]) {
+    for diagnostic in diagnostics {
+        eprintln!(
+            "{} {}: {}",
+            diagnostic.level, diagnostic.code, diagnostic.message
+        );
     }
 }
 
 fn read_json(path: &Path) -> Result<Value> {
-    let s = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    serde_json::from_str(&s).with_context(|| format!("parse json {}", path.display()))
+    let content = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    serde_json::from_str(&content).with_context(|| format!("parse json {}", path.display()))
 }
 
 fn write_json(path: PathBuf, value: &Value) -> Result<()> {
-    if let Some(parent) = path.parent() { fs::create_dir_all(parent)?; }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     fs::write(path, format!("{}\n", serde_json::to_string_pretty(value)?))?;
     Ok(())
 }
 
 fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<()> {
     let src = src.as_ref();
-    if !src.exists() { return Ok(()); }
-    for entry in WalkDir::new(src).into_iter().filter_map(Result::ok) {
+    if !src.exists() {
+        return Ok(());
+    }
+
+    for entry in WalkDir::new(src)
+        .into_iter()
+        .filter_map(std::result::Result::ok)
+    {
         let rel = entry.path().strip_prefix(src)?;
         let dest = dst.as_ref().join(rel);
-        if entry.file_type().is_dir() { fs::create_dir_all(dest)?; } else { fs::copy(entry.path(), dest)?; }
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(dest)?;
+        } else {
+            fs::copy(entry.path(), dest)?;
+        }
     }
+
     Ok(())
 }
 
-fn target_name(t: Target) -> &'static str {
-    match t { Target::Cc => "cc", Target::Codex => "codex", Target::Opencode => "opencode" }
+fn target_name(target: Target) -> &'static str {
+    match target {
+        Target::Cc => "cc",
+        Target::Codex => "codex",
+        Target::Opencode => "opencode",
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn blocking_words_are_conservative() {
-        assert!(infer_hook_effect("pre_apply guard exit 2") == "Block");
-        assert!(infer_hook_effect("observe log") == "Observe");
+        assert_eq!(infer_hook_effect("pre_apply guard exit 2"), "Block");
+        assert_eq!(infer_hook_effect("observe log"), "Observe");
     }
 
-    fn infer_hook_effect(s: &str) -> &'static str {
-        let x = s.to_ascii_lowercase();
-        if ["pre", "block", "deny", "reject", "exit 2", "guard"].iter().any(|k| x.contains(k)) { "Block" } else { "Observe" }
+    fn infer_hook_effect(input: &str) -> &'static str {
+        let lower = input.to_ascii_lowercase();
+        if ["pre", "block", "deny", "reject", "exit 2", "guard"]
+            .iter()
+            .any(|keyword| lower.contains(keyword))
+        {
+            "Block"
+        } else {
+            "Observe"
+        }
     }
 }
