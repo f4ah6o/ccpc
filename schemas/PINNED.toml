@@ -1,14 +1,30 @@
 # Schema vendoring pins for ccpc / apx.
-# Replace TODO values with exact upstream versions or commit SHAs.
+#
+# Each entry records the upstream source that ccpc's parsers and emitters are
+# written against. `retrieved` is the date the vocabulary below was last
+# reconciled with upstream. Bump `retrieved` (and re-verify the event/field
+# tables in src/main.rs) whenever upstream drifts.
+#
+# Pins are URL + retrieval-date anchors rather than commit SHAs: the three
+# ecosystems publish their plugin contracts as living documentation and hosted
+# JSON Schema rather than as a single vendored schema file. Drift detection is
+# therefore "does the vocabulary table still match the referenced page", not a
+# checksum compare.
 
 [claude-code]
-source = "TODO-pin-exact"
-version = "TODO-pin-exact"
+source = "https://code.claude.com/docs/en/plugins-reference"
+schema = "https://json.schemastore.org/claude-code-plugin-manifest.json"
+retrieved = "2026-06-16"
 
 [codex]
-source = "TODO-pin-exact"
-version = "TODO-pin-exact"
+# OpenAI Codex CLI has no first-class plugin manifest; ccpc models a
+# `.codex-plugin/plugin.json` layout and maps slash-commands onto Codex custom
+# prompts. Tracked against the Codex CLI repository.
+source = "https://github.com/openai/codex"
+schema = "TODO-pin-exact"
+retrieved = "2026-06-16"
 
 [opencode]
-source = "TODO-pin-exact"
-version = "TODO-pin-exact"
+source = "https://opencode.ai/docs/plugins/"
+schema = "https://opencode.ai/config.json"
+retrieved = "2026-06-16"

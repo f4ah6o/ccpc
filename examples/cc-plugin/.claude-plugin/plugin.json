@@ -1,0 +1,9 @@
+{
+  "name": "example-tools",
+  "version": "0.1.0",
+  "description": "Example Claude Code plugin used as a ccpc conversion fixture",
+  "keywords": ["example", "ccpc"],
+  "author": {
+    "name": "ccpc"
+  }
+}
